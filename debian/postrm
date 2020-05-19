@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # postrm script for jitsi-videobridge
 
 set -e
@@ -6,40 +6,42 @@ set -e
 # Load debconf
 . /usr/share/debconf/confmodule
 
+_purge() {
+	# Clear the debconf variable
+	db_purge
 
-case "$1" in
-    purge)
+	# and then remove the user
+	if getent passwd jvb > /dev/null
+	then
+		deluser jvb
+	fi
 
-        # Clear the debconf variable
-        db_purge
+	# clear logs
+	if [ -d "/var/log/jitsi" ]
+	then
+		rm -rf "/var/log/jitsi"
+	fi
 
-        # and then remove the user
-        if getent passwd jvb > /dev/null ; then
-            deluser jvb
-        fi
+	rm -f /etc/jitsi/videobridge/config
+	rm -f /etc/jitsi/videobridge/sip-communicator.properties
+	rm -f /etc/jitsi/videobridge/logging.properties
+	rm -rf /usr/share/jitsi-videobridge/.java
+	rm -rf /usr/share/jitsi-videobridge/.sip-communicator
 
-        # clear logs
-        if [ -d "/var/log/jitsi" ]; then
-            rm -rf "/var/log/jitsi"
-        fi
+	# make sure we remove keys we used ('jitsi-videobridge/jvb-hostname')
+	db_unregister jitsi-videobridge/jvb-hostname
+}
 
-        rm -f /etc/jitsi/videobridge/config
-        rm -f /etc/jitsi/videobridge/sip-communicator.properties
-        rm -f /etc/jitsi/videobridge/logging.properties
-        rm -rf /usr/share/jitsi-videobridge/.java
-        rm -rf /usr/share/jitsi-videobridge/.sip-communicator
-
-        # make sure we remove keys we used ('jitsi-videobridge/jvb-hostname')
-        db_unregister jitsi-videobridge/jvb-hostname
-    ;;
-
-    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
-    ;;
-
-    *)
+_wildcard() {
         echo "postrm called with unknown argument \`$1'" >&2
         exit 1
-    ;;
+}
+
+
+case "$1" in
+	purge) _purge;;
+	remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear) ;;
+	*) _wildcard;;
 esac
 
 # dh_installdeb will replace this with shell code automatically

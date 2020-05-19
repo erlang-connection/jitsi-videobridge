@@ -1,0 +1,100 @@
+variables:
+  MAVEN_CLI_OPTS: "-s .m2/settings.xml --batch-mode"
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+
+stages:
+  - build
+  - build:test 
+  - packaging
+  - packaging:test
+  - packaging:upload
+  - packaging:container
+
+cache:
+  paths:
+    - .m2/repository/
+    - target/
+
+######################################################################
+# firstly, we build our package from source, basend on maven:latest
+# docker image.
+######################################################################
+build:
+  stage: build
+  image: maven:latest
+  script:
+    - mvn $MAVEN_CLI_OPTS compile
+
+######################################################################
+# the second step is to test the generated code by using integrated
+# unit testing with maven.
+######################################################################
+test:
+  stage: build:test
+  image: maven:latest
+  script:
+    - mvn $MAVEN_CLI_OPTS test
+
+######################################################################
+# if everything is okay, we assume that our package is ready to be
+# packaged for different systems. In our case, we will build it
+# for debian and get the artifacts.
+######################################################################
+package:debian:build:
+  stage: packaging
+  image: debian:10
+  artifacts:
+    expire_in: 1 week
+    paths:
+    - "*.deb"
+  script:
+    - apt-get update
+    - apt-get install -y build-essential
+    - apt-get install -y debhelper openjdk-11-jre-headless maven
+    - apt-get install -y dh-systemd procps uuid-runtime
+    - dpkg-buildpackage --pre-clean -A -us -ui -uc
+    - "cp ../*.deb ."
+
+######################################################################
+# finally, we can install our artifact on our system and test if
+# everything is present and work fine.
+######################################################################
+package:debian:test:
+  stage: packaging:test
+  image: debian:10
+  dependencies:
+    - package:debian:build
+  script:
+    - "ls *.deb"
+    - "apt-get update"
+    - "apt-get install -y ./*.deb"
+    - "dpkg -L jitsi-videobridge2 | sort"
+
+######################################################################
+# when we got our artifacts and they match our need, we can upload
+# them into our repository.
+######################################################################
+package:debian:upload:
+  stage: packaging:upload
+  image: debian:10
+  dependencies:
+    - package:debian:build
+    - package:debian:test
+  script:
+    - "apt-get update"
+    - "apt-get install -y curl"
+    - "cat *.deb | curl -u ${APT_USER}:${APT_PASSWORD} -H 'Content-Type: multipart/form-data' --data-binary '@-' ${APT_REPOSITORY}"
+
+######################################################################
+# We build our docker image based on Dockerfile in the root directory
+# and we push it directly to the Docker repository with the variable
+# ${DOCKER_REPOSITORY} set in ci/cd pipeline
+######################################################################
+package:debian:docker:
+  stage: packaging:container
+  script:
+    - "docker login -u ${DOCKER_USER} -p ${DOCKER_PASSWORD} ${DOCKER_REPOSITORY}"
+    - "docker build -t ${DOCKER_REPOSITORY}/videobridge:debian ."
+    - "docker push ${DOCKER_REPOSITORY}/videobridge:debian"
+  tags:
+    - shell
